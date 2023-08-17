@@ -1,4 +1,11 @@
-﻿using System.Net.NetworkInformation;
+﻿using Microsoft.WindowsAPICodePack.Net;
+using System;
+using System.Linq;
+using System.Net;
+using System.Net.NetworkInformation;
+using System.Net.Sockets;
+using Misc;
+
 class networkPOC
 {
     public static void ShowNetworkInterfaces()
@@ -159,10 +166,125 @@ class networkPOC
             Console.WriteLine();
         }
     }
+   
+    public static void InviteViewersCommand()
+    {
+        NetworkInterface[] networkInterfaces = NetworkInterface.GetAllNetworkInterfaces();
+
+        string id = networkInterfaces
+            .Where(i => i.NetworkInterfaceType == NetworkInterfaceType.Wireless80211 && i.OperationalStatus == OperationalStatus.Up)
+            .Select(i => i.Id).FirstOrDefault();
+
+        Guid networkId;
+        string ssid = string.Empty;
+        bool isWifiConnected = false;
+
+        if (id != null)
+        {
+            networkId = new Guid(id);
+
+            var wifiNetworks = NetworkListManager.GetNetworks(NetworkConnectivityLevels.Connected)
+                .Where(n => n.DomainType == DomainType.NonDomainNetwork);
+
+
+            foreach (var network in wifiNetworks)
+            {
+                var adapter = network.Connections.Where(n => n.AdapterId == networkId).FirstOrDefault();
+                if (adapter != null)
+                {
+                    ssid = adapter.Network.Name;
+                    isWifiConnected = true;
+                    break;
+                }
+            }
+        }
+
+        if (ssid == string.Empty) ssid = "(blank to be filled out by Hal rep on location)";
+
+        Func<NetworkInterface, bool> networkTypeFilter;
+
+        if (isWifiConnected)
+            networkTypeFilter = networkInterface =>
+                networkInterface.NetworkInterfaceType == NetworkInterfaceType.Wireless80211 &&
+                networkInterface.OperationalStatus == OperationalStatus.Up;
+        else
+            networkTypeFilter = networkInterface =>
+                networkInterface.NetworkInterfaceType == NetworkInterfaceType.Ethernet &&
+                networkInterface.OperationalStatus == OperationalStatus.Up;
+
+        var ipadresses = networkInterfaces
+                .Where(networkTypeFilter)
+                .SelectMany(i => i.GetIPProperties().UnicastAddresses)
+                .Where(a => a.Address.AddressFamily == AddressFamily.InterNetwork)
+                .Select(a => a.Address.ToString())
+                .ToList();
+
+        var port = string.Empty;
+
+        string link = string.Empty;
+
+        for (int i = 0; i < ipadresses.Count; i++)
+        {
+            link += $"http://{ipadresses[i]}";
+            if (!string.IsNullOrEmpty(port))
+            {
+                link += $":{port}";
+            }
+
+            if (i != ipadresses.Count - 1 && ipadresses.Count > 1) link += " ";
+        }
+
+        string hostName = null;
+
+        IPAddress localhostIpAddress = networkInterfaces
+            .SelectMany(i =>
+                i.GetIPProperties().UnicastAddresses)
+            .Where(a =>
+                a.Address.AddressFamily == AddressFamily.InterNetwork && IPAddress.IsLoopback(a.Address))
+            .Select(a =>
+                a.Address).
+            FirstOrDefault();
+
+        if (localhostIpAddress != null)
+        {
+            string domainName = IPGlobalProperties.GetIPGlobalProperties().DomainName;
+            domainName = "." + domainName;
+
+            IPHostEntry ipHostEntry = Dns.GetHostEntry(localhostIpAddress);
+            hostName = ipHostEntry.HostName;
+
+            if (!hostName.EndsWith(domainName))  // if + does not already include domain name
+            {
+                hostName += domainName;   // add the domain name part
+            }
+
+            if (!string.IsNullOrEmpty(port))
+            {
+                hostName += $":{port}";
+            }
+
+            hostName = $"http://{hostName}";
+        }
+
+        try
+        {
+            string subject = "Halliburton Cementing Real-Time Data Stream: Connection Instructions";
+
+            Console.WriteLine("  link ............................. : {0}", link);
+            Console.WriteLine("  HostName ............................. : {0}", hostName);
+            Console.WriteLine("  ssid ............................. : {0}", ssid);
+
+        }
+        catch (System.Runtime.InteropServices.COMException ex)
+        {
+            Console.WriteLine("Unable to create email. Please try closing outlook before trying again");
+        }
+    }
     public static void Main(string[] args)
     {
-        ShowNetworkInterfaces();
-        ShowNetworkInterfacesPhysicalAddress();
-        DisplayIPv4NetworkInterfaces();
+        //ShowNetworkInterfaces();
+        //ShowNetworkInterfacesPhysicalAddress();
+        //DisplayIPv4NetworkInterfaces();
+        InviteViewersCommand();
     }
 }
